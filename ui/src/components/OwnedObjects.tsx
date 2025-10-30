@@ -14,14 +14,21 @@ import {
   TextField,
   Badge,
   Tabs,
+  Progress,
+  Box,
 } from "@radix-ui/themes";
 import { useState } from "react";
 import { useNetworkVariable } from "../networkConfig";
-import { Hero } from "../types/hero";
 import { transferHero } from "../utility/helpers/transfer_hero";
-import { listHero } from "../utility/marketplace/list_hero";
 import { createArena } from "../utility/arena/create_arena";
-import { RefreshProps } from "../types/props";
+import { listHero } from "../utility/marketplace/list_hero";
+import { levelUpHero } from "../utility/heroes/level_up";
+import { Hero } from "../types/hero";
+
+interface RefreshProps {
+  refreshKey: number;
+  setRefreshKey: (key: number) => void;
+}
 
 export function OwnedObjects({ refreshKey, setRefreshKey }: RefreshProps) {
   const account = useCurrentAccount();
@@ -36,6 +43,9 @@ export function OwnedObjects({ refreshKey, setRefreshKey }: RefreshProps) {
   }>({});
   const [isListing, setIsListing] = useState<{ [key: string]: boolean }>({});
   const [isCreatingBattle, setIsCreatingBattle] = useState<{
+    [key: string]: boolean;
+  }>({});
+  const [isLevelingUp, setIsLevelingUp] = useState<{
     [key: string]: boolean;
   }>({});
   const [copiedStates, setCopiedStates] = useState<{ [key: string]: boolean }>(
@@ -69,6 +79,34 @@ export function OwnedObjects({ refreshKey, setRefreshKey }: RefreshProps) {
     setTimeout(() => {
       setCopiedStates((prev) => ({ ...prev, [heroId]: false }));
     }, 2000);
+  };
+
+  const handleLevelUp = (heroId: string) => {
+    if (!packageId) return;
+
+    setIsLevelingUp((prev) => ({ ...prev, [heroId]: true }));
+
+    const tx = levelUpHero(packageId, heroId);
+    signAndExecute(
+      { transaction: tx },
+      {
+        onSuccess: async ({ digest }) => {
+          await suiClient.waitForTransaction({
+            digest,
+            options: {
+              showEffects: true,
+              showObjectChanges: true,
+            },
+          });
+
+          setRefreshKey(refreshKey + 1);
+          setIsLevelingUp((prev) => ({ ...prev, [heroId]: false }));
+        },
+        onError: () => {
+          setIsLevelingUp((prev) => ({ ...prev, [heroId]: false }));
+        },
+      },
+    );
   };
 
   const handleTransfer = (heroId: string, address: string) => {
@@ -200,29 +238,111 @@ export function OwnedObjects({ refreshKey, setRefreshKey }: RefreshProps) {
             const heroId = obj.data?.objectId!;
             const fields = hero.fields as Hero;
 
-            return (
-              <Card key={heroId} style={{ padding: "16px" }}>
-                <Flex direction="column" gap="3">
-                  {/* Hero Image */}
-                  <img
-                    src={fields.image_url}
-                    alt={fields.name}
-                    style={{
-                      width: "100%",
-                      height: "200px",
-                      objectFit: "cover",
-                      borderRadius: "8px",
-                    }}
-                  />
+            const level = Number(fields.level);
+            const experience = Number(fields.experience);
+            const power = Number(fields.power);
+            const expNeeded = level * level * 100;
+            const expProgress = Math.min((experience / expNeeded) * 100, 100);
+            const canLevelUp = experience >= expNeeded && level < 100;
 
-                  {/* Hero Info */}
+            return (
+              <Card
+                key={heroId}
+                style={{
+                  padding: "16px",
+                  border: canLevelUp ? "3px solid gold" : undefined,
+                  boxShadow: canLevelUp
+                    ? "0 0 20px rgba(255, 215, 0, 0.3)"
+                    : undefined,
+                }}
+              >
+                <Flex direction="column" gap="3">
+                  <Box style={{ position: "relative" }}>
+                    <img
+                      src={fields.image_url}
+                      alt={fields.name}
+                      style={{
+                        width: "100%",
+                        height: "200px",
+                        objectFit: "cover",
+                        borderRadius: "8px",
+                      }}
+                    />
+                    {canLevelUp && (
+                      <Badge
+                        color="yellow"
+                        size="2"
+                        style={{
+                          position: "absolute",
+                          top: "8px",
+                          right: "8px",
+                          animation: "pulse 2s infinite",
+                        }}
+                      >
+                        ✨ Ready!
+                      </Badge>
+                    )}
+                  </Box>
+
                   <Flex direction="column" gap="2">
-                    <Text size="5" weight="bold">
-                      {fields.name}
-                    </Text>
+                    <Flex align="center" justify="between">
+                      <Text size="5" weight="bold">
+                        {fields.name}
+                      </Text>
+                      <Badge color="purple" size="3">
+                        ⭐ Lvl {level}
+                      </Badge>
+                    </Flex>
+
                     <Badge color="blue" size="2">
-                      Power: {fields.power}
+                      ⚔️ Power: {power}
                     </Badge>
+
+                    <Flex direction="column" gap="1">
+                      <Flex justify="between">
+                        <Text size="2" color="gray">
+                          Experience
+                        </Text>
+                        <Text
+                          size="2"
+                          weight="bold"
+                          color={canLevelUp ? "yellow" : "gray"}
+                        >
+                          {experience} / {expNeeded}
+                        </Text>
+                      </Flex>
+                      <Progress
+                        value={expProgress}
+                        color={canLevelUp ? "yellow" : "blue"}
+                        size="2"
+                      />
+                    </Flex>
+
+                    {level >= 100 ? (
+                      <Badge
+                        color="gold"
+                        size="2"
+                        style={{ textAlign: "center" }}
+                      >
+                        🏆 MAX LEVEL
+                      </Badge>
+                    ) : canLevelUp ? (
+                      <Badge
+                        color="yellow"
+                        size="2"
+                        style={{ textAlign: "center" }}
+                      >
+                        ✨ Ready to Level Up! ✨
+                      </Badge>
+                    ) : (
+                      <Text
+                        size="2"
+                        color="gray"
+                        style={{ textAlign: "center" }}
+                      >
+                        Need {expNeeded - experience} more XP
+                      </Text>
+                    )}
 
                     <Flex align="center" gap="2">
                       <Text
@@ -245,13 +365,72 @@ export function OwnedObjects({ refreshKey, setRefreshKey }: RefreshProps) {
                     </Flex>
                   </Flex>
 
-                  {/* Action Tabs */}
-                  <Tabs.Root defaultValue="transfer">
+                  <Tabs.Root defaultValue="levelup">
                     <Tabs.List size="2">
+                      <Tabs.Trigger value="levelup">Level Up</Tabs.Trigger>
                       <Tabs.Trigger value="transfer">Transfer</Tabs.Trigger>
-                      <Tabs.Trigger value="list">List for Sale</Tabs.Trigger>
+                      <Tabs.Trigger value="list">List</Tabs.Trigger>
                       <Tabs.Trigger value="battle">Battle</Tabs.Trigger>
                     </Tabs.List>
+
+                    <Tabs.Content value="levelup">
+                      <Flex
+                        direction="column"
+                        gap="3"
+                        mt="3"
+                        p="3"
+                        style={{
+                          background: "var(--gold-2)",
+                          borderRadius: "8px",
+                          border: "1px solid var(--gold-6)",
+                        }}
+                      >
+                        <Flex direction="column" gap="2">
+                          <Text size="3" weight="bold" color="gold">
+                            ⬆️ Level Up Hero
+                          </Text>
+                          <Text size="2" color="gray">
+                            Leveling up increases power by +10 and costs{" "}
+                            {expNeeded} XP
+                          </Text>
+                        </Flex>
+
+                        <Box>
+                          <Text size="2" weight="medium">
+                            Preview:
+                          </Text>
+                          <Flex gap="2" mt="2" wrap="wrap">
+                            <Badge color="purple">
+                              Lvl: {level} → {level + 1}
+                            </Badge>
+                            <Badge color="blue">
+                              Power: {power} → {power + 10}
+                            </Badge>
+                            <Badge color="orange">
+                              XP: {experience} →{" "}
+                              {Math.max(0, experience - expNeeded)}
+                            </Badge>
+                          </Flex>
+                        </Box>
+
+                        <Button
+                          onClick={() => handleLevelUp(heroId)}
+                          disabled={!canLevelUp || isLevelingUp[heroId]}
+                          loading={isLevelingUp[heroId]}
+                          color="yellow"
+                          size="3"
+                          style={{ width: "100%" }}
+                        >
+                          {isLevelingUp[heroId]
+                            ? "Leveling Up..."
+                            : level >= 100
+                              ? "🏆 Max Level"
+                              : !canLevelUp
+                                ? `Need ${expNeeded - experience} XP`
+                                : "⬆️ Level Up!"}
+                        </Button>
+                      </Flex>
+                    </Tabs.Content>
 
                     <Tabs.Content value="transfer">
                       <Flex direction="column" gap="2" mt="3">
@@ -312,8 +491,8 @@ export function OwnedObjects({ refreshKey, setRefreshKey }: RefreshProps) {
                     <Tabs.Content value="battle">
                       <Flex direction="column" gap="2" mt="3">
                         <Text size="2" color="gray">
-                          Create a battle place for other players to challenge
-                          your hero.
+                          Create a battle arena for others to challenge your
+                          hero.
                         </Text>
                         <Button
                           onClick={() => handleCreateBattle(heroId)}
@@ -334,6 +513,13 @@ export function OwnedObjects({ refreshKey, setRefreshKey }: RefreshProps) {
           })}
         </Grid>
       )}
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+      `}</style>
     </Flex>
   );
 }
